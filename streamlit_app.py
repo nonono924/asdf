@@ -4,7 +4,11 @@ import time
 import json
 import os
 from datetime import date, datetime, timedelta
-from anthropic import Anthropic
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
 
 # ─────────────────────────────────────────────
 # LOGIN / ACTIVITY TRACKING
