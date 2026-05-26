@@ -1,5 +1,6 @@
 # app.py
-# 例文付き 多言語単語学習アプリ
+# 多言語単語学習アプリ
+# Streamlit版
 
 import streamlit as st
 import random
@@ -9,7 +10,7 @@ import os
 from datetime import datetime, timedelta
 
 # =========================
-# gtts 安全読み込み
+# 音声ライブラリ
 # =========================
 try:
     from gtts import gTTS
@@ -18,7 +19,7 @@ except:
     GTTS_AVAILABLE = False
 
 # =========================
-# autorefresh 安全読み込み
+# タイマー自動更新
 # =========================
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -26,6 +27,9 @@ try:
 except:
     AUTO_REFRESH = False
 
+# =========================
+# ページ設定
+# =========================
 st.set_page_config(
     page_title="多言語単語学習アプリ",
     page_icon="📚",
@@ -33,21 +37,15 @@ st.set_page_config(
 )
 
 # =========================
-# 単語データ（例文付き）
+# 単語データ
 # =========================
 WORDS = {
     "英語": [
         {
             "jp": "りんご",
             "foreign": "apple",
-            "example": "I eat an apple every morning.",
-            "example_jp": "私は毎朝りんごを食べます。"
-        },
-        {
-            "jp": "水",
-            "foreign": "water",
-            "example": "Please drink more water.",
-            "example_jp": "もっと水を飲んでください。"
+            "example": "I eat an apple every day.",
+            "example_jp": "私は毎日りんごを食べます。"
         },
         {
             "jp": "猫",
@@ -56,25 +54,61 @@ WORDS = {
             "example_jp": "猫が寝ています。"
         },
         {
+            "jp": "水",
+            "foreign": "water",
+            "example": "Please drink water.",
+            "example_jp": "水を飲んでください。"
+        },
+        {
             "jp": "学校",
             "foreign": "school",
-            "example": "I go to school by bus.",
-            "example_jp": "私はバスで学校に行きます。"
+            "example": "I go to school.",
+            "example_jp": "私は学校へ行きます。"
         },
         {
             "jp": "友達",
             "foreign": "friend",
-            "example": "She is my best friend.",
-            "example_jp": "彼女は私の親友です。"
+            "example": "She is my friend.",
+            "example_jp": "彼女は私の友達です。"
         },
+        {
+            "jp": "犬",
+            "foreign": "dog",
+            "example": "The dog runs fast.",
+            "example_jp": "犬は速く走ります。"
+        },
+        {
+            "jp": "本",
+            "foreign": "book",
+            "example": "I read a book.",
+            "example_jp": "私は本を読みます。"
+        },
+        {
+            "jp": "車",
+            "foreign": "car",
+            "example": "This car is new.",
+            "example_jp": "この車は新しいです。"
+        },
+        {
+            "jp": "先生",
+            "foreign": "teacher",
+            "example": "My teacher is kind.",
+            "example_jp": "私の先生は親切です。"
+        },
+        {
+            "jp": "食べる",
+            "foreign": "eat",
+            "example": "I eat breakfast.",
+            "example_jp": "私は朝ごはんを食べます。"
+        }
     ],
 
     "韓国語": [
         {
             "jp": "こんにちは",
             "foreign": "안녕하세요",
-            "example": "안녕하세요! 만나서 반갑습니다.",
-            "example_jp": "こんにちは！お会いできて嬉しいです。"
+            "example": "안녕하세요! 반갑습니다.",
+            "example_jp": "こんにちは！よろしくお願いします。"
         },
         {
             "jp": "ありがとう",
@@ -97,111 +131,45 @@ WORDS = {
         {
             "jp": "友達",
             "foreign": "친구",
-            "example": "친구와 영화를 봤어요.",
-            "example_jp": "友達と映画を見ました。"
-        },
-    ],
-
-    "フランス語": [
-        {
-            "jp": "こんにちは",
-            "foreign": "bonjour",
-            "example": "Bonjour, comment allez-vous ?",
-            "example_jp": "こんにちは、お元気ですか？"
+            "example": "친구와 놀았어요.",
+            "example_jp": "友達と遊びました。"
         },
         {
-            "jp": "ありがとう",
-            "foreign": "merci",
-            "example": "Merci beaucoup.",
-            "example_jp": "本当にありがとうございます。"
+            "jp": "犬",
+            "foreign": "강아지",
+            "example": "강아지가 뛰어요.",
+            "example_jp": "犬が走っています。"
         },
         {
-            "jp": "猫",
-            "foreign": "chat",
-            "example": "Le chat dort.",
-            "example_jp": "猫が寝ています。"
+            "jp": "本",
+            "foreign": "책",
+            "example": "책을 읽어요.",
+            "example_jp": "本を読みます。"
         },
         {
-            "jp": "学校",
-            "foreign": "école",
-            "example": "Je vais à l'école.",
-            "example_jp": "私は学校へ行きます。"
+            "jp": "車",
+            "foreign": "자동차",
+            "example": "자동차를 탔어요.",
+            "example_jp": "車に乗りました。"
         },
         {
-            "jp": "友達",
-            "foreign": "ami",
-            "example": "Il est mon ami.",
-            "example_jp": "彼は私の友達です。"
-        },
-    ],
-
-    "中国語": [
-        {
-            "jp": "こんにちは",
-            "foreign": "你好",
-            "example": "你好，很高兴见到你。",
-            "example_jp": "こんにちは、お会いできて嬉しいです。"
+            "jp": "先生",
+            "foreign": "선생님",
+            "example": "선생님이 친절해요.",
+            "example_jp": "先生は親切です。"
         },
         {
-            "jp": "ありがとう",
-            "foreign": "谢谢",
-            "example": "谢谢你的帮助。",
-            "example_jp": "助けてくれてありがとう。"
-        },
-        {
-            "jp": "猫",
-            "foreign": "猫",
-            "example": "猫在睡觉。",
-            "example_jp": "猫が寝ています。"
-        },
-        {
-            "jp": "学校",
-            "foreign": "学校",
-            "example": "我去学校。",
-            "example_jp": "私は学校へ行きます。"
-        },
-        {
-            "jp": "友達",
-            "foreign": "朋友",
-            "example": "他是我的朋友。",
-            "example_jp": "彼は私の友達です。"
-        },
-    ],
-
-    "ドイツ語": [
-        {
-            "jp": "こんにちは",
-            "foreign": "Hallo",
-            "example": "Hallo! Wie geht's?",
-            "example_jp": "こんにちは！元気ですか？"
-        },
-        {
-            "jp": "ありがとう",
-            "foreign": "Danke",
-            "example": "Danke für deine Hilfe.",
-            "example_jp": "助けてくれてありがとう。"
-        },
-        {
-            "jp": "猫",
-            "foreign": "Katze",
-            "example": "Die Katze schläft.",
-            "example_jp": "猫が寝ています。"
-        },
-        {
-            "jp": "学校",
-            "foreign": "Schule",
-            "example": "Ich gehe zur Schule.",
-            "example_jp": "私は学校へ行きます。"
-        },
-        {
-            "jp": "友達",
-            "foreign": "Freund",
-            "example": "Er ist mein Freund.",
-            "example_jp": "彼は私の友達です。"
-        },
+            "jp": "食べる",
+            "foreign": "먹다",
+            "example": "밥을 먹어요.",
+            "example_jp": "ご飯を食べます。"
+        }
     ]
 }
 
+# =========================
+# 言語コード
+# =========================
 LANG_CODES = {
     "英語": "en",
     "韓国語": "ko",
@@ -211,18 +179,24 @@ LANG_CODES = {
 }
 
 # =========================
-# 継続日数
+# 継続日数ファイル
 # =========================
 STREAK_FILE = "streak.json"
 
 def load_streak():
+
     if os.path.exists(STREAK_FILE):
+
         with open(STREAK_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    return {"last_date": "", "streak": 0}
+    return {
+        "last_date": "",
+        "streak": 0
+    }
 
 def save_streak(data):
+
     with open(STREAK_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f)
 
@@ -233,24 +207,27 @@ def update_streak():
     today = datetime.now().date()
 
     if data["last_date"] == "":
+
         data["last_date"] = str(today)
         data["streak"] = 1
 
     else:
 
-        last = datetime.strptime(
+        last_date = datetime.strptime(
             data["last_date"],
             "%Y-%m-%d"
         ).date()
 
-        if today == last:
+        if today == last_date:
             pass
 
-        elif today == last + timedelta(days=1):
+        elif today == last_date + timedelta(days=1):
+
             data["streak"] += 1
             data["last_date"] = str(today)
 
         else:
+
             data["streak"] = 1
             data["last_date"] = str(today)
 
@@ -285,7 +262,7 @@ def speak(text, lang):
         st.error(e)
 
 # =========================
-# session state
+# session_state
 # =========================
 if "daily_words" not in st.session_state:
     st.session_state.daily_words = []
@@ -306,27 +283,33 @@ if "start_time" not in st.session_state:
     st.session_state.start_time = time.time()
 
 # =========================
-# UI
+# タイトル
 # =========================
 st.title("📚 多言語単語学習アプリ")
 
+# =========================
+# 継続日数
+# =========================
 st.success(
-    f"🔥 継続日数: {update_streak()} 日"
+    f"🔥 学習継続日数: {update_streak()} 日"
 )
 
+# =========================
+# 言語選択
+# =========================
 language = st.selectbox(
-    "学習する言語",
+    "学習する言語を選択",
     list(WORDS.keys())
 )
 
 # =========================
 # 単語生成
 # =========================
-if st.button("🎯 今日の単語を生成"):
+if st.button("🎯 今日の単語10個を生成"):
 
     st.session_state.daily_words = random.sample(
         WORDS[language],
-        min(5, len(WORDS[language]))
+        min(10, len(WORDS[language]))
     )
 
     st.session_state.mode = "study"
@@ -340,15 +323,13 @@ if st.session_state.daily_words and st.session_state.mode == "study":
 
     for i, word in enumerate(st.session_state.daily_words):
 
-        with st.expander(f"{i+1}. {word['jp']} → {word['foreign']}"):
+        with st.expander(
+            f"{i+1}. {word['jp']} → {word['foreign']}"
+        ):
 
-            st.markdown(
-                f"## {word['foreign']}"
-            )
+            st.markdown(f"## {word['foreign']}")
 
-            st.write(
-                f"意味: {word['jp']}"
-            )
+            st.write(f"意味: {word['jp']}")
 
             st.markdown("### 📝 例文")
 
@@ -360,7 +341,7 @@ if st.session_state.daily_words and st.session_state.mode == "study":
 
             if st.button(
                 f"🔊 単語読み上げ {i}",
-                key=f"word_audio_{i}"
+                key=f"word_{i}"
             ):
                 speak(
                     word["foreign"],
@@ -369,7 +350,7 @@ if st.session_state.daily_words and st.session_state.mode == "study":
 
             if st.button(
                 f"🔊 例文読み上げ {i}",
-                key=f"sentence_audio_{i}"
+                key=f"sentence_{i}"
             ):
                 speak(
                     word["example"],
@@ -405,7 +386,7 @@ if st.session_state.daily_words and st.session_state.mode == "study":
         st.rerun()
 
 # =========================
-# テスト
+# テストモード
 # =========================
 if st.session_state.mode == "test":
 
@@ -419,6 +400,7 @@ if st.session_state.mode == "test":
         q = st.session_state.test_words[index]
 
         if AUTO_REFRESH:
+
             st_autorefresh(
                 interval=1000,
                 key="timer"
@@ -431,9 +413,17 @@ if st.session_state.mode == "test":
 
         remain = max(0, 20 - elapsed)
 
+        # 視覚的タイマー
         st.progress(remain / 20)
 
-        st.write(f"⏰ 残り {remain} 秒")
+        if remain > 10:
+            st.success(f"⏰ 残り {remain} 秒")
+
+        elif remain > 5:
+            st.warning(f"⏰ 残り {remain} 秒")
+
+        else:
+            st.error(f"⏰ 残り {remain} 秒")
 
         st.subheader(
             f"問題 {index+1} / {total}"
@@ -446,14 +436,15 @@ if st.session_state.mode == "test":
         )
 
         answer = st.text_input(
-            "答え",
+            "答えを入力",
             key=f"answer_{index}"
         )
 
+        # 時間切れ
         if remain <= 0:
 
             st.error(
-                f"時間切れ！ 正解: {q['answer']}"
+                f"⏰ 時間切れ！ 正解: {q['answer']}"
             )
 
             if st.button("次へ"):
@@ -469,7 +460,8 @@ if st.session_state.mode == "test":
 
                 if answer.strip().lower() == q["answer"].strip().lower():
 
-                    st.success("⭕ 正解")
+                    st.success("⭕ 正解！")
+
                     st.session_state.score += 1
 
                 else:
