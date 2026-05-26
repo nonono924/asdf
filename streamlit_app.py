@@ -576,6 +576,19 @@ stats = st.session_state.stats
 with st.sidebar:
     st.markdown("## 🎴 ゲーム設定")
 
+    # API Key input
+    with st.expander("🔑 Anthropic API キー設定", expanded=False):
+        api_key_input = st.text_input(
+            "API キー",
+            type="password",
+            value=st.session_state.get("anthropic_api_key", ""),
+            placeholder="sk-ant-...",
+            help="ゲーム終了後にAIコメントを表示するために必要です。入力しなくてもゲームは遊べます。"
+        )
+        if api_key_input:
+            st.session_state.anthropic_api_key = api_key_input
+            st.success("✅ APIキーを設定しました")
+
     lang = st.selectbox(
         "言語を選ぶ",
         ["韓国語", "フランス語", "英語", "イギリス英語", "中国語", "ドイツ語"],
@@ -754,25 +767,35 @@ if st.session_state.game_over:
     # AI comment using Anthropic
     if "ai_comment_done" not in st.session_state:
         st.session_state.ai_comment_done = True
-        client = Anthropic()
-        with st.spinner("AIがコメントを考えています…"):
-            lang_name = st.session_state.language
-            level_name = st.session_state.level
-            outcome = "あなたの勝ち" if ps > ai_s else ("AIの勝ち" if ai_s > ps else "引き分け")
-            msg = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"語学かるたゲームが終わりました。"
-                        f"言語:{lang_name}, 難易度:{level_name}, 結果:{outcome}(プレイヤー{ps}枚, AI{ai_s}枚)。"
-                        f"プレイヤーへの励ましやアドバイスを100文字以内で、かるたAI対戦相手として話しかけてください。絵文字も使ってください。"
+        # APIキーをサイドバーまたは環境変数から取得
+        api_key = st.session_state.get("anthropic_api_key", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        if not ANTHROPIC_AVAILABLE:
+            st.warning("💡 anthropic ライブラリが見つかりません。`pip install anthropic` を実行してください。")
+        elif not api_key:
+            st.info("💡 サイドバーに Anthropic API キーを入力するとAIコメントが表示されます。")
+        else:
+            try:
+                client = Anthropic(api_key=api_key)
+                with st.spinner("AIがコメントを考えています…"):
+                    lang_name = st.session_state.language
+                    level_name = st.session_state.level
+                    outcome = "あなたの勝ち" if ps > ai_s else ("AIの勝ち" if ai_s > ps else "引き分け")
+                    msg = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=200,
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                f"語学かるたゲームが終わりました。"
+                                f"言語:{lang_name}, 難易度:{level_name}, 結果:{outcome}(プレイヤー{ps}枚, AI{ai_s}枚)。"
+                                f"プレイヤーへの励ましやアドバイスを100文字以内で、かるたAI対戦相手として話しかけてください。絵文字も使ってください。"
+                            )
+                        }]
                     )
-                }]
-            )
-            ai_comment = msg.content[0].text
-        st.info(f"🤖 AI: {ai_comment}")
+                    ai_comment = msg.content[0].text
+                st.info(f"🤖 AI: {ai_comment}")
+            except Exception as e:
+                st.warning(f"AIコメントの取得に失敗しました: {e}")
     st.stop()
 
 # ── ACTIVE GAME ──────────────────────────────
