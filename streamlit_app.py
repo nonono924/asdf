@@ -1,115 +1,138 @@
-# app.py
-# Streamlit AI Image Description Game
-# 必要ライブラリ:
-# pip install streamlit pillow requests openai
+# streamlit_app.py
+# OpenAI不要版 AI画像説明ゲーム
+# 実行:
+# pip install streamlit pillow
 
 import streamlit as st
-import time
-from PIL import Image, ImageDraw
 import random
-from io import BytesIO
-
-# =========================
-# OpenAI API設定
-# =========================
-# Streamlit Cloudの場合:
-# secrets.toml に
-# OPENAI_API_KEY="xxxxx"
-#
-# ローカルの場合:
-# export OPENAI_API_KEY=xxxxx
-
-from openai import OpenAI
-
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+import time
+from PIL import Image, ImageDraw, ImageFont
 
 # =========================
 # 設定
 # =========================
 TIME_LIMIT = 240  # 4分
 
-IMAGE_PROMPTS = [
-    "A cat riding a skateboard in Tokyo at night, anime style",
-    "A futuristic underwater city with glowing whales",
-    "A dragon eating ramen in Osaka",
-    "A robot teacher in a Japanese classroom",
-    "A giant panda working in a convenience store",
-    "A samurai playing electric guitar on stage",
-    "A magical library floating in the sky",
+THEMES = [
+    "宇宙",
+    "ドラゴン",
+    "未来都市",
+    "猫",
+    "海底",
+    "ロボット",
+    "お城",
+    "忍者",
+    "パンダ",
+    "魔法学校",
 ]
 
 # =========================
-# AI画像生成
+# 擬似AI画像生成
 # =========================
-def generate_ai_image(prompt):
+def generate_fake_ai_image(theme):
     """
-    OpenAI Images API を使って画像生成
+    PILだけで簡単な画像生成
     """
-    try:
-        result = client.images.generate(
-            model="gpt-image-1",
-            prompt=prompt,
-            size="1024x1024"
+
+    width = 700
+    height = 500
+
+    colors = [
+        (255, 120, 120),
+        (120, 255, 120),
+        (120, 120, 255),
+        (255, 255, 120),
+        (255, 120, 255),
+    ]
+
+    bg = random.choice(colors)
+
+    img = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(img)
+
+    # ランダム図形
+    for _ in range(20):
+        x1 = random.randint(0, width)
+        y1 = random.randint(0, height)
+        x2 = x1 + random.randint(20, 120)
+        y2 = y1 + random.randint(20, 120)
+
+        shape_color = (
+            random.randint(0,255),
+            random.randint(0,255),
+            random.randint(0,255)
         )
 
-        image_base64 = result.data[0].b64_json
+        if random.random() > 0.5:
+            draw.ellipse([x1, y1, x2, y2], fill=shape_color)
+        else:
+            draw.rectangle([x1, y1, x2, y2], fill=shape_color)
 
-        import base64
-        image_bytes = base64.b64decode(image_base64)
+    # テーマ文字
+    draw.text((50, 40), f"テーマ: {theme}", fill="black")
 
-        image = Image.open(BytesIO(image_bytes))
-        return image
-
-    except Exception as e:
-        st.error(f"画像生成エラー: {e}")
-
-        # フォールバック画像
-        img = Image.new("RGB", (512, 512), color=(200, 200, 200))
-        draw = ImageDraw.Draw(img)
-        draw.text((50, 250), "IMAGE GENERATION FAILED", fill=(0, 0, 0))
-        return img
+    return img
 
 # =========================
-# AI採点
+# 採点
 # =========================
-def evaluate_answer(user_text, prompt):
+def evaluate_answer(answer, theme):
     """
-    AIによる採点と模範解答生成
+    簡易採点システム
     """
 
-    system_prompt = """
-あなたは画像説明ゲームの採点AIです。
+    score = 0
+    feedback = []
 
-以下を返してください:
-1. 点数（100点満点）
-2. 良かった点
-3. 改善点
-4. AIによる模範解答
+    # 文字数
+    length = len(answer)
 
-日本語で返してください。
+    if length > 30:
+        score += 20
+        feedback.append("説明がしっかり書けています。")
+
+    if length > 80:
+        score += 20
+        feedback.append("とても詳しい説明です。")
+
+    # テーマ一致
+    if theme in answer:
+        score += 30
+        feedback.append("テーマを正しく捉えています。")
+
+    # 表現力
+    expressive_words = [
+        "美しい",
+        "大きい",
+        "明るい",
+        "不思議",
+        "未来",
+        "幻想的",
+        "カラフル",
+    ]
+
+    found = 0
+    for word in expressive_words:
+        if word in answer:
+            found += 1
+
+    score += found * 5
+
+    # 上限
+    score = min(score, 100)
+
+    # 模範解答
+    sample = f"""
+この画像は「{theme}」をテーマにした作品です。
+カラフルな図形や独特な配置によって、
+幻想的で不思議な世界観が表現されています。
+全体的に明るく、創造力を感じるアートになっています。
 """
 
-    user_prompt = f"""
-画像生成プロンプト:
-{prompt}
-
-プレイヤーの説明:
-{user_text}
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.7
-    )
-
-    return response.choices[0].message.content
+    return score, feedback, sample
 
 # =========================
-# セッション初期化
+# 初期化
 # =========================
 if "started" not in st.session_state:
     st.session_state.started = False
@@ -117,89 +140,101 @@ if "started" not in st.session_state:
 if "finished" not in st.session_state:
     st.session_state.finished = False
 
-if "start_time" not in st.session_state:
-    st.session_state.start_time = None
-
-if "prompt" not in st.session_state:
-    st.session_state.prompt = random.choice(IMAGE_PROMPTS)
+if "theme" not in st.session_state:
+    st.session_state.theme = random.choice(THEMES)
 
 if "image" not in st.session_state:
     st.session_state.image = None
 
-if "result" not in st.session_state:
-    st.session_state.result = None
+if "start_time" not in st.session_state:
+    st.session_state.start_time = None
+
+if "score" not in st.session_state:
+    st.session_state.score = 0
+
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
+
+if "sample" not in st.session_state:
+    st.session_state.sample = ""
 
 # =========================
-# タイトル
+# UI
 # =========================
 st.title("🎨 AI画像説明ゲーム")
 
 st.write("""
-### ルール
-- AIが画像を生成します
-- 画像を見て説明を書いてください
-- 制限時間は4分です
-- 終了後、AIが採点＆模範解答を表示します
+## ルール
+- AI風画像が表示されます
+- 画像の説明を書いてください
+- 制限時間は4分
+- 最後に採点されます
 """)
 
 # =========================
-# ゲーム開始
+# 開始前
 # =========================
 if not st.session_state.started:
 
     if st.button("ゲーム開始"):
 
-        with st.spinner("AIが画像を生成中..."):
-            image = generate_ai_image(st.session_state.prompt)
+        st.session_state.image = generate_fake_ai_image(
+            st.session_state.theme
+        )
 
-        st.session_state.image = image
         st.session_state.started = True
         st.session_state.start_time = time.time()
 
         st.rerun()
 
 # =========================
-# ゲーム中
+# プレイ中
 # =========================
 elif st.session_state.started and not st.session_state.finished:
 
-    # タイマー
     elapsed = int(time.time() - st.session_state.start_time)
     remaining = max(TIME_LIMIT - elapsed, 0)
 
     minutes = remaining // 60
     seconds = remaining % 60
 
-    st.subheader(f"⏰ 残り時間: {minutes:02}:{seconds:02}")
+    st.subheader(f"⏰ 残り時間 {minutes:02}:{seconds:02}")
 
-    # 画像表示
-    st.image(st.session_state.image, caption="AI Generated Image")
+    st.image(st.session_state.image)
 
-    # 回答欄
-    user_answer = st.text_area(
+    answer = st.text_area(
         "画像を説明してください",
-        height=250,
-        key="answer"
+        height=250
     )
 
-    # 時間切れ or 提出
+    # 時間切れ
     if remaining <= 0:
-        st.warning("時間切れです！")
 
-        with st.spinner("AI採点中..."):
-            result = evaluate_answer(user_answer, st.session_state.prompt)
+        score, feedback, sample = evaluate_answer(
+            answer,
+            st.session_state.theme
+        )
 
-        st.session_state.result = result
+        st.session_state.score = score
+        st.session_state.feedback = feedback
+        st.session_state.sample = sample
         st.session_state.finished = True
+
         st.rerun()
 
-    if st.button("提出する"):
+    # 提出
+    if st.button("提出"):
 
-        with st.spinner("AI採点中..."):
-            result = evaluate_answer(user_answer, st.session_state.prompt)
+        score, feedback, sample = evaluate_answer(
+            answer,
+            st.session_state.theme
+        )
 
-        st.session_state.result = result
+        st.session_state.score = score
+        st.session_state.feedback = feedback
+        st.session_state.sample = sample
         st.session_state.finished = True
+
         st.rerun()
 
     # 自動更新
@@ -207,7 +242,7 @@ elif st.session_state.started and not st.session_state.finished:
     st.rerun()
 
 # =========================
-# 結果画面
+# 結果
 # =========================
 elif st.session_state.finished:
 
@@ -215,16 +250,22 @@ elif st.session_state.finished:
 
     st.image(st.session_state.image)
 
-    st.markdown("## 📝 AI採点結果")
-    st.write(st.session_state.result)
+    st.header(f"🏆 スコア: {st.session_state.score}/100")
+
+    st.subheader("💬 フィードバック")
+
+    for f in st.session_state.feedback:
+        st.write(f"✅ {f}")
+
+    st.subheader("🤖 AI模範解答")
+    st.write(st.session_state.sample)
 
     if st.button("もう一回遊ぶ"):
 
         st.session_state.started = False
         st.session_state.finished = False
-        st.session_state.start_time = None
-        st.session_state.prompt = random.choice(IMAGE_PROMPTS)
+        st.session_state.theme = random.choice(THEMES)
         st.session_state.image = None
-        st.session_state.result = None
+        st.session_state.start_time = None
 
         st.rerun()
