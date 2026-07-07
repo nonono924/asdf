@@ -373,97 +373,66 @@ POS_LABELS = {
 }
 
 # ─────────────────────────────────────────────
-# 外部 API 連携（すべての英単語を検索できるようにする）
-#   - dictionaryapi.dev  : 定義・品詞・例文・類義語/対義語
-#   - api.datamuse.com   : 類義語/対義語の補完
-#   - api.mymemory.translated.net : 日本語訳
-#   いずれも無料・APIキー不要
+# 辞書エンジン（NLTK WordNet を利用）
+#   外部の辞書APIに頼らず、NLTKに同梱される WordNet コーパスを
+#   ローカルで検索することで、ほぼ全ての英単語（活用形含む）を
+#   ネットワーク状況に左右されずに調べられるようにする。
+#   日本語訳のみ、補助的に無料翻訳APIを利用する（失敗しても英語の
+#   定義にフォールバックするので検索自体は失敗しない）。
 # ─────────────────────────────────────────────
+import difflib
 
-DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/{}"
-DATAMUSE_API_URL = "https://api.datamuse.com/words"
+try:
+    import nltk
+    from nltk.corpus import wordnet as wn
+    NLTK_IMPORT_OK = True
+except ImportError:
+    NLTK_IMPORT_OK = False
+
 TRANSLATE_API_URL = "https://api.mymemory.translated.net/get"
+REQUEST_TIMEOUT = 10
+
+WORDNET_POS_LABELS = {
+    "n": "noun",
+    "v": "verb",
+    "a": "adjective",
+    "s": "adjective",  # satellite adjective
+    "r": "adverb",
+}
 
 
-@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
-def fetch_dictionary_data(word: str):
-    """dictionaryapi.dev から品詞・英語定義・例文・類義語/対義語を取得"""
+@st.cache_resource(show_spinner=False)
+def ensure_wordnet_ready():
+    """WordNet コーパスを用意する（初回のみダウンロードし、以降はローカルキャッシュを使用）"""
+    if not NLTK_IMPORT_OK:
+        return False
     try:
-        resp = requests.get(DICTIONARY_API_URL.format(word), timeout=8)
-        if resp.status_code != 200:
-            return None
-        payload = resp.json()
-        if not isinstance(payload, list) or not payload:
-            return None
-        entry = payload[0]
-        meanings = entry.get("meanings", [])
-        if not meanings:
-            return None
-
-        pos = meanings[0].get("partOfSpeech", "other")
-        definitions = meanings[0].get("definitions", [])
-        meaning_en = definitions[0].get("definition", "") if definitions else ""
-
-        examples, synonyms, antonyms = [], [], []
-        for m in meanings:
-            synonyms.extend(m.get("synonyms", []))
-            antonyms.extend(m.get("antonyms", []))
-            for d in m.get("definitions", []):
-                if d.get("example"):
-                    examples.append(d["example"])
-                synonyms.extend(d.get("synonyms", []))
-                antonyms.extend(d.get("antonyms", []))
-
-        # 重複除去（順序維持）
-        synonyms = list(dict.fromkeys(synonyms))
-        antonyms = list(dict.fromkeys(antonyms))
-        examples = list(dict.fromkeys(examples))
-
-        return {
-            "pos": pos if pos in POS_LABELS else "other",
-            "meaning_en": meaning_en,
-            "examples": examples[:3],
-            "synonyms": synonyms[:4],
-            "antonyms": antonyms[:4],
-        }
-    except requests.RequestException:
-        return None
-
-
-@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
-def fetch_datamuse_related(word: str, relation: str):
-    """Datamuse API で類義語(syn) / 対義語(ant) を補完取得"""
-    try:
-        resp = requests.get(
-            DATAMUSE_API_URL,
-            params={f"rel_{relation}": word, "max": 6},
-            timeout=8,
-        )
-        if resp.status_code == 200:
-            return [item["word"] for item in resp.json() if "word" in item]
-    except requests.RequestException:
+        nltk.data.find("corpora/wordnet")
+        return True
+    except LookupError:
         pass
-    return []
-
-
-@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
-def translate_to_japanese(text: str):
-    """MyMemory API で英語→日本語に翻訳"""
-    if not text:
-        return ""
     try:
-        resp = requests.get(
-            TRANSLATE_API_URL,
-            params={"q": text, "langpair": "en|ja"},
-            timeout=8,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            translated = data.get("responseData", {}).get("translatedText", "")
-            return translated or text
-    except requests.RequestException:
-        pass
-    return text
+        nltk.download("wordnet", quiet=True)
+        nltk.data.find("corpora/wordnet")
+        return True
+    except Exception:
+        return False
+
+
+@st.cache_resource(show_spinner=False)
+def all_known_words():
+    """スペル候補（did you mean）用に WordNet の全単語を1度だけ読み込んでおく"""
+    if not ensure_wordnet_ready():
+        return set()
+    try:
+        return set(name.replace("_", " ") for name in wn.all_lemma_names())
+    except Exception:
+        return set()
+
+
+def is_valid_word(word: str) -> bool:
+    """英字・ハイフン・アポストロフィのみで構成されているか簡易チェック"""
+    return bool(word) and bool(re.fullmatch(r"[a-z]+(?:[-'][a-z]+)*", word))
 
 
 def bold_first_match(example: str, word: str) -> str:
@@ -472,50 +441,110 @@ def bold_first_match(example: str, word: str) -> str:
     return pattern.sub(lambda m: f"<b>{m.group(0)}</b>", example, count=1)
 
 
-def is_valid_word(word: str) -> bool:
-    """英字・ハイフン・アポストロフィのみで構成されているか簡易チェック"""
-    return bool(word) and bool(re.fullmatch(r"[a-z]+(?:[-'][a-z]+)*", word))
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def translate_to_japanese(text: str) -> str:
+    """MyMemory API で英語→日本語に翻訳（失敗時は元の英語をそのまま返す＝検索は失敗させない）"""
+    if not text:
+        return ""
+    try:
+        resp = requests.get(
+            TRANSLATE_API_URL,
+            params={"q": text, "langpair": "en|ja"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = data.get("responseData", {}).get("translatedText", "")
+            if translated and "MYMEMORY WARNING" not in translated.upper():
+                return translated
+    except (requests.RequestException, ValueError, AttributeError):
+        pass
+    return text
 
 
-def lookup_word(word: str):
-    """任意の英単語を外部 API から検索してデータを返す"""
-    w = word.strip().lower()
-    if not is_valid_word(w):
-        return None, w
+def build_word_data(word: str):
+    """WordNet から品詞・定義・例文・類義語/対義語を集めて1つのデータにまとめる"""
+    try:
+        synsets = wn.synsets(word)
+    except Exception:
+        return None
+    if not synsets:
+        return None
 
-    dict_data = fetch_dictionary_data(w)
-    if dict_data is None:
-        return None, w
+    pos_code = synsets[0].pos()
+    pos = WORDNET_POS_LABELS.get(pos_code, "other")
+    meaning_en = synsets[0].definition()
 
-    synonyms = list(dict_data["synonyms"])
-    antonyms = list(dict_data["antonyms"])
+    examples, synonyms, antonyms = [], [], []
+    for syn in synsets[:5]:
+        examples.extend(syn.examples())
+        for lemma in syn.lemmas():
+            name = lemma.name().replace("_", " ")
+            if name.lower() != word.lower():
+                synonyms.append(name)
+            for ant in lemma.antonyms():
+                antonyms.append(ant.name().replace("_", " "))
 
-    # 辞書APIに類義語/対義語が少ない場合は Datamuse で補完
-    if len(synonyms) < 3:
-        extra = fetch_datamuse_related(w, "syn")
-        synonyms = list(dict.fromkeys(synonyms + extra))[:4]
-    if len(antonyms) < 2:
-        extra = fetch_datamuse_related(w, "ant")
-        antonyms = list(dict.fromkeys(antonyms + extra))[:4]
+    synonyms = list(dict.fromkeys(synonyms))[:4]
+    antonyms = list(dict.fromkeys(antonyms))[:4]
+    examples = list(dict.fromkeys(examples))[:2]
 
-    # 例文（無ければ簡単な例文をその場で生成）
-    examples_raw = dict_data["examples"][:2]
-    if not examples_raw:
-        examples_raw = [f"Can you use the word \"{w}\" in a sentence?"]
-    examples = [bold_first_match(e, w) for e in examples_raw]
+    if not examples:
+        examples = [f"Can you use the word \"{word}\" in a sentence?"]
+    examples = [bold_first_match(e, word) for e in examples]
 
-    meaning_en = dict_data["meaning_en"]
     meaning_ja = translate_to_japanese(meaning_en)
 
     return {
-        "pos": dict_data["pos"],
+        "pos": pos,
         "meaning": meaning_ja if meaning_ja else meaning_en,
         "meaning_en": meaning_en,
         "synonyms": synonyms,
         "antonyms": antonyms,
         "examples": examples,
-    }, w
+    }
 
+
+def lookup_word(word: str):
+    """任意の英単語を WordNet（オフライン辞書）から検索してデータを返す。
+
+    戻り値: {
+        "data": 単語データ dict または None,
+        "matched_word": 実際にヒットした単語（活用形補正後）,
+        "reason": "ok" / "invalid" / "not_found" / "network_error",
+        "suggestions": スペル候補のリスト（見つからなかった場合）,
+    }
+    """
+    w = word.strip().lower()
+
+    if not is_valid_word(w):
+        return {"data": None, "matched_word": w, "reason": "invalid", "suggestions": []}
+
+    if not ensure_wordnet_ready():
+        return {"data": None, "matched_word": w, "reason": "network_error", "suggestions": []}
+
+    data = build_word_data(w)
+    matched_word = w
+
+    if data is None:
+        # 複数形・過去形・ing形などは WordNet の形態素解析(morphy)で原形に変換して再挑戦
+        for pos_code in ("n", "v", "a", "r"):
+            try:
+                base = wn.morphy(w, pos_code)
+            except Exception:
+                base = None
+            if base and base != w:
+                candidate_data = build_word_data(base)
+                if candidate_data:
+                    data, matched_word = candidate_data, base
+                    break
+
+    if data is None:
+        known = all_known_words()
+        suggestions = difflib.get_close_matches(w, known, n=5, cutoff=0.8) if known else []
+        return {"data": None, "matched_word": w, "reason": "not_found", "suggestions": suggestions}
+
+    return {"data": data, "matched_word": matched_word, "reason": "ok", "suggestions": []}
 
 def generate_quiz(quiz_type: str):
     """テストを生成"""
@@ -593,6 +622,25 @@ def init_state():
 init_state()
 
 # ─────────────────────────────────────────────
+# 辞書データ（WordNet）の準備確認
+#   初回起動時のみ NLTK が WordNet コーパスをダウンロードするため、
+#   ここで一度だけ実行して結果をキャッシュしておく。
+# ─────────────────────────────────────────────
+if not NLTK_IMPORT_OK:
+    st.error(
+        "このアプリを動かすには `nltk` パッケージが必要です。\n\n"
+        "ターミナルで `pip install nltk` を実行してから、アプリを再起動してください。"
+    )
+elif "wordnet_ready" not in st.session_state:
+    with st.spinner("辞書データを準備しています（初回起動時のみ・数十秒かかることがあります）…"):
+        st.session_state.wordnet_ready = ensure_wordnet_ready()
+    if not st.session_state.wordnet_ready:
+        st.warning(
+            "辞書データ（WordNet）のダウンロードに失敗しました。初回起動時にはインターネット接続が必要です。"
+            "接続を確認して、ページを再読み込みしてください。"
+        )
+
+# ─────────────────────────────────────────────
 # ヘッダー
 # ─────────────────────────────────────────────
 st.markdown("""
@@ -639,15 +687,33 @@ if st.session_state.mode == "study":
 
     if search_input and search_input.strip():
         with st.spinner("検索中…"):
-            data, word = lookup_word(search_input)
+            result = lookup_word(search_input)
+
+        data = result["data"]
+        word = result["matched_word"]
+        reason = result["reason"]
 
         if data is None:
+            if reason == "invalid":
+                message = "英字（と - や '）のみで入力してください。"
+                extra = ""
+            elif reason == "network_error":
+                message = "辞書サーバーに接続できませんでした。"
+                extra = "しばらく待ってから再度お試しください。ネットワーク接続やファイアウォールの設定もご確認ください。"
+            else:
+                message = f"「{search_input}」は見つかりませんでした"
+                if result["suggestions"]:
+                    chips = " ".join(f"「{s}」" for s in result["suggestions"])
+                    extra = f"もしかして: {chips}"
+                else:
+                    extra = "スペルを確認するか、別の英単語で検索してください。"
+
             st.markdown(f"""
             <div class="wl-card" style="border-color:#502a38;">
               <div class="wl-empty-icon">🔍</div>
-              <p style="color:#e05d7a;font-size:16px;font-weight:600;">「{search_input}」は見つかりませんでした</p>
+              <p style="color:#e05d7a;font-size:16px;font-weight:600;">{message}</p>
               <p style="color:#4a5080;font-size:13px;margin-top:8px;">
-                スペルを確認するか、別の英単語で検索してください。
+                {extra}
               </p>
             </div>""", unsafe_allow_html=True)
         else:
