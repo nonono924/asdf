@@ -101,14 +101,21 @@ elif page == "② 書く（日記・思い出・妄想）":
     target_pool = unlearned if unlearned else data["words"]
  
     if not target_pool:
-        st.info("まず「① 単語を登録」から覚えたい単語を追加してください。")
-    else:
-        entry_type = st.radio(
-            "どのタイプで書きますか？",
-            ["📝 一行日記", "💭 思い出話", "✨ 妄想ストーリー"],
-            horizontal=True,
+        st.info(
+            "まだ単語が登録されていません。「① 単語を登録」から追加すると、"
+            "使う単語を選んでチェックできるようになります。"
+            "登録なしでも下の本文欄にそのまま書けます。"
         )
  
+    entry_type = st.radio(
+        "どのタイプで書きますか？",
+        ["📝 一行日記", "💭 思い出話", "✨ 妄想ストーリー"],
+        horizontal=True,
+    )
+ 
+    selected_words = []
+ 
+    if target_pool:
         st.write("使いたい単語を選んでください（複数選択可、未習得の単語を優先表示）")
  
         word_options = [w["word"] for w in target_pool]
@@ -130,7 +137,7 @@ elif page == "② 書く（日記・思い出・妄想）":
             st.caption("おすすめ単語: " + ", ".join(st.session_state.shuffled_words))
  
         selected_words = st.multiselect(
-            "使う単語を選択",
+            "使う単語を選択（任意）",
             options=word_options,
             default=[
                 w for w in st.session_state.shuffled_words if w in word_options
@@ -144,46 +151,44 @@ elif page == "② 書く（日記・思い出・妄想）":
                     if w["word"] in selected_words and w["meaning"]:
                         st.write(f"- **{w['word']}**: {w['meaning']}")
  
-        text = st.text_area(
-            "本文を書く（選んだ単語を英語のまま文中に入れてください）",
-            height=180,
-            placeholder="例: Today I felt so ephemeral, like a firework disappearing into the night sky...",
-        )
+    text = st.text_area(
+        "本文を書く（単語を選んでいる場合は、その単語を英語のまま文中に入れてください）",
+        height=220,
+        placeholder="例: Today I felt so ephemeral, like a firework disappearing into the night sky...",
+    )
  
-        if st.button("💾 保存する", type="primary"):
-            if not text.strip():
-                st.warning("本文を入力してください")
-            elif not selected_words:
-                st.warning("使う単語を1つ以上選んでください")
-            else:
-                used_in_text = [
-                    w for w in selected_words if w.lower() in text.lower()
-                ]
-                missing = [w for w in selected_words if w not in used_in_text]
+    if st.button("💾 保存する", type="primary"):
+        if not text.strip():
+            st.warning("本文を入力してください")
+        else:
+            used_in_text = [
+                w for w in selected_words if w.lower() in text.lower()
+            ]
+            missing = [w for w in selected_words if w not in used_in_text]
  
-                data["entries"].append(
-                    {
-                        "date": str(datetime.now().strftime("%Y-%m-%d %H:%M")),
-                        "type": entry_type,
-                        "text": text.strip(),
-                        "words_used": used_in_text,
-                    }
+            data["entries"].append(
+                {
+                    "date": str(datetime.now().strftime("%Y-%m-%d %H:%M")),
+                    "type": entry_type,
+                    "text": text.strip(),
+                    "words_used": used_in_text,
+                }
+            )
+ 
+            for w in data["words"]:
+                if w["word"] in used_in_text:
+                    w["use_count"] += 1
+ 
+            save_data(data)
+ 
+            if missing:
+                st.warning(
+                    "保存しました！ただし本文中に見つからなかった単語があります: "
+                    + ", ".join(missing)
                 )
- 
-                for w in data["words"]:
-                    if w["word"] in used_in_text:
-                        w["use_count"] += 1
- 
-                save_data(data)
- 
-                if missing:
-                    st.warning(
-                        "保存しました！ただし本文中に見つからなかった単語があります: "
-                        + ", ".join(missing)
-                    )
-                else:
-                    st.success("保存しました！選んだ単語をすべて使えています 🎉")
-                st.balloons()
+            else:
+                st.success("保存しました！ 🎉")
+            st.balloons()
  
 # ---------- ③ 履歴を見る ----------
 elif page == "③ 履歴を見る":
@@ -243,4 +248,3 @@ elif page == "④ 統計":
         st.write(", ".join(unused))
     else:
         st.info("すべての単語を一度は使っています！")
- 
