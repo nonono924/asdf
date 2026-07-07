@@ -1,6 +1,8 @@
 import streamlit as st
 import json
 import random
+import re
+import requests
 
 # ─────────────────────────────────────────────
 # ページ設定
@@ -135,6 +137,12 @@ section[data-testid="stSidebar"] { display: none !important; }
     margin-bottom: 24px;
     padding-bottom: 24px;
     border-bottom: 1px solid #2a2f50;
+}
+.wl-meaning-en {
+    font-size: 14px;
+    color: #7a80a8;
+    margin-top: 6px;
+    font-style: italic;
 }
 
 /* ── セクションラベル ── */
@@ -348,142 +356,166 @@ footer { display: none !important; }
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 単語データベース（Anthropic API 不使用のサンプルデータ）
+# 品詞ラベル
 # ─────────────────────────────────────────────
-WORD_DB = {
-    "abandon": {
-        "pos": "verb",
-        "meaning": "（人・場所・物を）見捨てる、放棄する",
-        "synonyms": ["desert", "forsake", "relinquish", "discard"],
-        "antonyms": ["keep", "maintain", "retain", "pursue"],
-        "examples": [
-            "She decided to <b>abandon</b> the project after months of failure.",
-            "He was forced to <b>abandon</b> his car in the snowstorm.",
-        ],
-    },
-    "abundant": {
-        "pos": "adjective",
-        "meaning": "豊富な、たくさんある",
-        "synonyms": ["plentiful", "ample", "copious", "profuse"],
-        "antonyms": ["scarce", "rare", "sparse", "meager"],
-        "examples": [
-            "The region has <b>abundant</b> natural resources.",
-            "There is <b>abundant</b> evidence to support this theory.",
-        ],
-    },
-    "ambiguous": {
-        "pos": "adjective",
-        "meaning": "曖昧な、多義的な、はっきりしない",
-        "synonyms": ["vague", "unclear", "equivocal", "obscure"],
-        "antonyms": ["clear", "definite", "explicit", "unambiguous"],
-        "examples": [
-            "His <b>ambiguous</b> answer left us confused.",
-            "The contract contained several <b>ambiguous</b> clauses.",
-        ],
-    },
-    "benevolent": {
-        "pos": "adjective",
-        "meaning": "慈悲深い、親切な、善意の",
-        "synonyms": ["kind", "generous", "charitable", "philanthropic"],
-        "antonyms": ["malevolent", "cruel", "selfish", "unkind"],
-        "examples": [
-            "The <b>benevolent</b> donor funded the entire scholarship.",
-            "She gave a <b>benevolent</b> smile to every student.",
-        ],
-    },
-    "candid": {
-        "pos": "adjective",
-        "meaning": "率直な、正直な、遠慮のない",
-        "synonyms": ["frank", "honest", "straightforward", "blunt"],
-        "antonyms": ["evasive", "dishonest", "guarded", "secretive"],
-        "examples": [
-            "I appreciate your <b>candid</b> feedback on my work.",
-            "She was <b>candid</b> about the difficulties ahead.",
-        ],
-    },
-    "diligent": {
-        "pos": "adjective",
-        "meaning": "勤勉な、努力家の、丁寧な",
-        "synonyms": ["hardworking", "industrious", "assiduous", "thorough"],
-        "antonyms": ["lazy", "negligent", "careless", "idle"],
-        "examples": [
-            "A <b>diligent</b> student reviews notes every day.",
-            "Her <b>diligent</b> research impressed the entire committee.",
-        ],
-    },
-    "eloquent": {
-        "pos": "adjective",
-        "meaning": "雄弁な、説得力のある、表現豊かな",
-        "synonyms": ["articulate", "expressive", "fluent", "persuasive"],
-        "antonyms": ["inarticulate", "incoherent", "mumbling", "hesitant"],
-        "examples": [
-            "The senator delivered an <b>eloquent</b> speech on climate change.",
-            "She wrote an <b>eloquent</b> essay about her childhood.",
-        ],
-    },
-    "fragile": {
-        "pos": "adjective",
-        "meaning": "壊れやすい、脆弱な、もろい",
-        "synonyms": ["brittle", "delicate", "frail", "breakable"],
-        "antonyms": ["strong", "sturdy", "durable", "robust"],
-        "examples": [
-            "Please handle the <b>fragile</b> glassware with care.",
-            "The peace agreement remains <b>fragile</b> and uncertain.",
-        ],
-    },
-    "gratitude": {
-        "pos": "noun",
-        "meaning": "感謝、感謝の気持ち",
-        "synonyms": ["thankfulness", "appreciation", "gratefulness", "recognition"],
-        "antonyms": ["ingratitude", "ungratefulness", "indifference"],
-        "examples": [
-            "She expressed deep <b>gratitude</b> for their support.",
-            "His heart was filled with <b>gratitude</b> after the rescue.",
-        ],
-    },
-    "hinder": {
-        "pos": "verb",
-        "meaning": "妨げる、邪魔をする、阻止する",
-        "synonyms": ["impede", "obstruct", "hamper", "block"],
-        "antonyms": ["help", "assist", "facilitate", "promote"],
-        "examples": [
-            "Bad weather can <b>hinder</b> rescue operations.",
-            "Don't let fear <b>hinder</b> your progress.",
-        ],
-    },
-}
-
 POS_LABELS = {
     "noun": "名詞",
     "verb": "動詞",
     "adjective": "形容詞",
     "adverb": "副詞",
+    "pronoun": "代名詞",
+    "preposition": "前置詞",
+    "conjunction": "接続詞",
+    "interjection": "間投詞",
+    "exclamation": "感嘆詞",
+    "determiner": "限定詞",
+    "other": "その他",
 }
 
 # ─────────────────────────────────────────────
-# セッション状態の初期化
+# 外部 API 連携（すべての英単語を検索できるようにする）
+#   - dictionaryapi.dev  : 定義・品詞・例文・類義語/対義語
+#   - api.datamuse.com   : 類義語/対義語の補完
+#   - api.mymemory.translated.net : 日本語訳
+#   いずれも無料・APIキー不要
 # ─────────────────────────────────────────────
-def init_state():
-    defaults = {
-        "mode": "study",
-        "current_word": None,
-        "history": {},          # word -> word_data
-        "quiz": None,           # quiz state dict
-        "quiz_type": "meaning", # meaning / synonym / example
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
 
-init_state()
+DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/{}"
+DATAMUSE_API_URL = "https://api.datamuse.com/words"
+TRANSLATE_API_URL = "https://api.mymemory.translated.net/get"
 
-# ─────────────────────────────────────────────
-# ユーティリティ
-# ─────────────────────────────────────────────
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def fetch_dictionary_data(word: str):
+    """dictionaryapi.dev から品詞・英語定義・例文・類義語/対義語を取得"""
+    try:
+        resp = requests.get(DICTIONARY_API_URL.format(word), timeout=8)
+        if resp.status_code != 200:
+            return None
+        payload = resp.json()
+        if not isinstance(payload, list) or not payload:
+            return None
+        entry = payload[0]
+        meanings = entry.get("meanings", [])
+        if not meanings:
+            return None
+
+        pos = meanings[0].get("partOfSpeech", "other")
+        definitions = meanings[0].get("definitions", [])
+        meaning_en = definitions[0].get("definition", "") if definitions else ""
+
+        examples, synonyms, antonyms = [], [], []
+        for m in meanings:
+            synonyms.extend(m.get("synonyms", []))
+            antonyms.extend(m.get("antonyms", []))
+            for d in m.get("definitions", []):
+                if d.get("example"):
+                    examples.append(d["example"])
+                synonyms.extend(d.get("synonyms", []))
+                antonyms.extend(d.get("antonyms", []))
+
+        # 重複除去（順序維持）
+        synonyms = list(dict.fromkeys(synonyms))
+        antonyms = list(dict.fromkeys(antonyms))
+        examples = list(dict.fromkeys(examples))
+
+        return {
+            "pos": pos if pos in POS_LABELS else "other",
+            "meaning_en": meaning_en,
+            "examples": examples[:3],
+            "synonyms": synonyms[:4],
+            "antonyms": antonyms[:4],
+        }
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def fetch_datamuse_related(word: str, relation: str):
+    """Datamuse API で類義語(syn) / 対義語(ant) を補完取得"""
+    try:
+        resp = requests.get(
+            DATAMUSE_API_URL,
+            params={f"rel_{relation}": word, "max": 6},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            return [item["word"] for item in resp.json() if "word" in item]
+    except requests.RequestException:
+        pass
+    return []
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def translate_to_japanese(text: str):
+    """MyMemory API で英語→日本語に翻訳"""
+    if not text:
+        return ""
+    try:
+        resp = requests.get(
+            TRANSLATE_API_URL,
+            params={"q": text, "langpair": "en|ja"},
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            translated = data.get("responseData", {}).get("translatedText", "")
+            return translated or text
+    except requests.RequestException:
+        pass
+    return text
+
+
+def bold_first_match(example: str, word: str) -> str:
+    """例文中の対象単語（活用形も含む）を最初の1回だけ太字にする"""
+    pattern = re.compile(re.escape(word), re.IGNORECASE)
+    return pattern.sub(lambda m: f"<b>{m.group(0)}</b>", example, count=1)
+
+
+def is_valid_word(word: str) -> bool:
+    """英字・ハイフン・アポストロフィのみで構成されているか簡易チェック"""
+    return bool(word) and bool(re.fullmatch(r"[a-z]+(?:[-'][a-z]+)*", word))
+
+
 def lookup_word(word: str):
-    """単語を検索してデータを返す"""
+    """任意の英単語を外部 API から検索してデータを返す"""
     w = word.strip().lower()
-    return WORD_DB.get(w), w
+    if not is_valid_word(w):
+        return None, w
+
+    dict_data = fetch_dictionary_data(w)
+    if dict_data is None:
+        return None, w
+
+    synonyms = list(dict_data["synonyms"])
+    antonyms = list(dict_data["antonyms"])
+
+    # 辞書APIに類義語/対義語が少ない場合は Datamuse で補完
+    if len(synonyms) < 3:
+        extra = fetch_datamuse_related(w, "syn")
+        synonyms = list(dict.fromkeys(synonyms + extra))[:4]
+    if len(antonyms) < 2:
+        extra = fetch_datamuse_related(w, "ant")
+        antonyms = list(dict.fromkeys(antonyms + extra))[:4]
+
+    # 例文（無ければ簡単な例文をその場で生成）
+    examples_raw = dict_data["examples"][:2]
+    if not examples_raw:
+        examples_raw = [f"Can you use the word \"{w}\" in a sentence?"]
+    examples = [bold_first_match(e, w) for e in examples_raw]
+
+    meaning_en = dict_data["meaning_en"]
+    meaning_ja = translate_to_japanese(meaning_en)
+
+    return {
+        "pos": dict_data["pos"],
+        "meaning": meaning_ja if meaning_ja else meaning_en,
+        "meaning_en": meaning_en,
+        "synonyms": synonyms,
+        "antonyms": antonyms,
+        "examples": examples,
+    }, w
+
 
 def generate_quiz(quiz_type: str):
     """テストを生成"""
@@ -497,7 +529,6 @@ def generate_quiz(quiz_type: str):
         if quiz_type == "meaning":
             question_text = f"次の単語の意味は？ → <b>{target}</b>"
             correct = data["meaning"]
-            # 誤答選択肢
             distractors = [
                 st.session_state.history[w]["meaning"]
                 for w in words if w != target
@@ -516,7 +547,7 @@ def generate_quiz(quiz_type: str):
             if not data["examples"]:
                 continue
             ex = random.choice(data["examples"])
-            blank = ex.replace(f"<b>{target}</b>", "______")
+            blank = re.sub(r"<b>.*?</b>", "______", ex, count=1)
             question_text = f"空欄に入る単語は？<br><br>{blank}"
             correct = target
             distractors = [w for w in words if w != target][:3]
@@ -542,6 +573,24 @@ def generate_quiz(quiz_type: str):
         "score": 0,
         "finished": False,
     }
+
+
+# ─────────────────────────────────────────────
+# セッション状態の初期化
+# ─────────────────────────────────────────────
+def init_state():
+    defaults = {
+        "mode": "study",
+        "current_word": None,
+        "history": {},          # word -> word_data
+        "quiz": None,           # quiz state dict
+        "quiz_type": "meaning", # meaning / synonym / example
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+init_state()
 
 # ─────────────────────────────────────────────
 # ヘッダー
@@ -584,12 +633,13 @@ st.markdown(f"""
 # 学習モード
 # ═══════════════════════════════════════════════
 if st.session_state.mode == "study":
-    st.markdown('<p style="color:#7a80a8;font-size:14px;margin-bottom:20px;">調べたい英単語を入力してください</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#7a80a8;font-size:14px;margin-bottom:20px;">調べたい英単語を入力してください（すべての英単語に対応）</p>', unsafe_allow_html=True)
 
-    search_input = st.text_input("word", placeholder="例：abandon, eloquent, diligent …", label_visibility="collapsed")
+    search_input = st.text_input("word", placeholder="例：abandon, eloquent, diligent, serendipity …", label_visibility="collapsed")
 
     if search_input and search_input.strip():
-        data, word = lookup_word(search_input)
+        with st.spinner("検索中…"):
+            data, word = lookup_word(search_input)
 
         if data is None:
             st.markdown(f"""
@@ -597,7 +647,7 @@ if st.session_state.mode == "study":
               <div class="wl-empty-icon">🔍</div>
               <p style="color:#e05d7a;font-size:16px;font-weight:600;">「{search_input}」は見つかりませんでした</p>
               <p style="color:#4a5080;font-size:13px;margin-top:8px;">
-                登録済み単語：{", ".join(sorted(WORD_DB.keys()))}
+                スペルを確認するか、別の英単語で検索してください。
               </p>
             </div>""", unsafe_allow_html=True)
         else:
@@ -613,7 +663,10 @@ if st.session_state.mode == "study":
             <div class="wl-card">
               <div class="wl-word-title">{word}</div>
               <div class="wl-pos-badge">{data['pos']} · {pos_ja}</div>
-              <div class="wl-meaning">{data['meaning']}</div>
+              <div class="wl-meaning">
+                {data['meaning']}
+                <div class="wl-meaning-en">{data['meaning_en']}</div>
+              </div>
 
               <div class="wl-section-label">類義語 (Synonyms)</div>
               <div class="wl-word-chips" style="margin-bottom:24px;">{syns if syns else '<span style="color:#3a4060">—</span>'}</div>
